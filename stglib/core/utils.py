@@ -189,17 +189,20 @@ def ds_add_attrs(ds):
 
     ds['time'].attrs.update({
         'standard_name': 'time',
-        'axis': 'T'})
+        'axis': 'T',
+        'time_zone':'UTC'})
 
     ds['epic_time'].attrs.update({
         'units': 'True Julian Day',
         'type': 'EVEN',
-        'epic_code': 624})
+        'epic_code': 624,
+        'time_zone':'UTC'})
 
     ds['epic_time2'].attrs.update({
         'units': 'msec since 0:00 GMT',
         'type': 'EVEN',
-        'epic_code': 624})
+        'epic_code': 624,
+        'time_zone':'UTC'})
 
     def add_attributes(var, dsattrs):
         var.attrs.update({
