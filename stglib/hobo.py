@@ -1,7 +1,9 @@
 from __future__ import division, print_function
+import numpy as np
 import pandas as pd
 import xarray as xr
 from .core import utils
+
 
 def read_hobo(filnam, skiprows=1, skipfooter=0):
     """Read data from an Onset HOBO pressure sensor .csv file into an xarray
@@ -21,12 +23,12 @@ def read_hobo(filnam, skiprows=1, skipfooter=0):
     xarray.Dataset
         An xarray Dataset of the HOBO data
     """
-    hobo =  pd.read_csv(filnam,
-                      usecols=[0, 1, 2, 3],
-                      names=['#','datetime','abspres_kPa','temp_C'],
-                      engine='python',
-                      skiprows=skiprows,
-                      skipfooter=skipfooter)
+    hobo = pd.read_csv(filnam,
+                       usecols=[0, 1, 2, 3],
+                       names=['#', 'datetime', 'abspres_kPa', 'temp_C'],
+                       engine='python',
+                       skiprows=skiprows,
+                       skipfooter=skipfooter)
     hobo['time'] = pd.to_datetime(hobo['datetime'])
     hobo['abspres_dbar'] = hobo['abspres_kPa']/10
     hobo.set_index('time', inplace=True)
@@ -100,13 +102,13 @@ def ds_add_attrs(ds):
 
     ds['BPR_915'].attrs.update({'units': 'mbar',
                                 'long_name': 'Barometric pressure',
-                                'epic_code': 106})
+                                'epic_code': 915})
 
     ds = ds.rename({'temp_C': 'T_21'})
 
     ds['T_21'].attrs.update({'units': 'C',
                              'long_name': 'Air temperature',
-                             'epic_code': 28})
+                             'epic_code': 21})
 
     def add_attributes(var, dsattrs):
         var.attrs.update({
@@ -119,6 +121,8 @@ def ds_add_attrs(ds):
     for var in ds.variables:
         if (var not in ds.coords) and ('time' not in var):
             add_attributes(ds[var], ds.attrs)
+
+    ds.attrs['COMPOSITE'] = np.int32(0)
 
     return ds
 
@@ -148,19 +152,24 @@ def cdf_to_nc(cdf_filename):
     # assign min/max:
     ds = utils.add_min_max(ds)
 
+    ds = utils.add_start_stop_time(ds)
+
     ds = utils.create_epic_times(ds)
 
-    # ds = eco_add_delta_t(ds)
+    ds = utils.add_delta_t(ds)
 
     # add lat/lon coordinates
     ds = utils.ds_add_lat_lon(ds)
 
     ds = ds_add_attrs(ds)
 
+    ds = utils.no_p_create_depth(ds)
+
     # add lat/lon coordinates to each variable
     for var in ds.variables:
         if (var not in ds.coords) and ('time' not in var):
             ds = utils.add_lat_lon(ds, var)
+            ds = utils.no_p_add_depth(ds, var)
             # cast as float32
             ds = utils.set_var_dtype(ds, var)
 

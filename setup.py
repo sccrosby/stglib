@@ -2,6 +2,7 @@ from setuptools import setup, find_packages
 # To use a consistent encoding
 from codecs import open
 from os import path
+import versioneer
 
 here = path.abspath(path.dirname(__file__))
 
@@ -12,8 +13,10 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
 # used https://github.com/pypa/sampleproject/blob/master/setup.py
 
 setup(name='stglib',
-      version='0.1dev',
-      description='Process oceanographic data',
+      version=versioneer.get_version(),
+      cmdclass=versioneer.get_cmdclass(),
+      description=('Process data from a variety of oceanographic '
+                   'instrumentation'),
       long_description=long_description,
       long_description_content_type='text/markdown',
       author='Dan Nowacki',
@@ -21,13 +24,21 @@ setup(name='stglib',
       url='https://github.com/dnowacki-usgs/stglib',
       license='Public domain',
       classifiers=['Development Status :: 3 - Alpha',
-                   'Programming Language :: Python :: 3.6'],
+                   'Intended Audience :: Science/Research',
+                   'Programming Language :: Python',
+                   'Programming Language :: Python :: 3',
+                   'Programming Language :: Python :: 3.5',
+                   'Programming Language :: Python :: 3.6',
+                   'Programming Language :: Python :: 3.7'],
       # install_requires=['numpy', 'netCDF4', 'xarray'],
+      python_requires='>=3.5',
       packages=find_packages(exclude=['doc', 'tests']),
       scripts=['scripts/runaqdhdr2cdf.py',
                'scripts/runaqdcdf2nc.py',
-               'scripts/runhlmcsv2cdf.py',
-               'scripts/runhlmcdf2nc.py',
+               'scripts/runhwlbcsv2cdf.py',
+               'scripts/runhwlbcdf2nc.py',
+               'scripts/runiqmat2cdf.py',
+               'scripts/runiqcdf2nc.py',
                'scripts/runrskrsk2cdf.py',
                'scripts/runrskcdf2nc.py',
                'scripts/runrsknc2waves.py',

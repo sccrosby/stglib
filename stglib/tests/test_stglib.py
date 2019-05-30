@@ -8,6 +8,7 @@ import pandas as pd
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
 class TestGlobalAttributes(unittest.TestCase):
 
     def test_mooring_as_string(self):
@@ -77,6 +78,12 @@ class TestAqd(unittest.TestCase):
         self.p = np.expand_dims([0, -5, 5], 1)
         self.r = np.expand_dims([0, 3, -3], 1)
 
+        self.ds = xr.Dataset()
+        self.ds['time'] = xr.DataArray(
+            pd.date_range('2000-01-01 00:00',
+                          '2000-01-30 00:00',
+                          freq='15min'), dims='time')
+
     def test_coord_transform(self):
         # Using Nortek example m-file and compare to Matlab results
         # http://www.nortekusa.com/lib/forum-attachments/coordinate-transformation/view
@@ -92,9 +99,10 @@ class TestAqd(unittest.TestCase):
                                                   'BEAM')
 
         result = np.hstack((u, v, w))
-        expected = np.array([[0.530273437500000, -0.205039062500000, 0.374726562500000],
-                             [0.510589752632478, -0.266778740685713, 0.363012589777355],
-                             [-0.144471300248944, 0.544447107731532, 0.382565448778586]])
+        expected = np.array([
+            [0.530273437500000, -0.205039062500000, 0.374726562500000],
+            [0.510589752632478, -0.266778740685713, 0.363012589777355],
+            [-0.144471300248944, 0.544447107731532, 0.382565448778586]])
 
         np.testing.assert_allclose(result, expected)
 
@@ -115,9 +123,10 @@ class TestAqd(unittest.TestCase):
                                                   'BEAM')
 
         result = np.hstack((u, v, w))
-        expected = np.array([[-0.530273437500000, -0.205039062500000, -0.374726562500000],
-                             [-0.581528098781915, -0.135532612145337, -0.327271926208413],
-                             [0.457413978956800, -0.281857021448140, -0.418306112347528]])
+        expected = np.array([
+            [-0.530273437500000, -0.205039062500000, -0.374726562500000],
+            [-0.581528098781915, -0.135532612145337, -0.327271926208413],
+            [0.457413978956800, -0.281857021448140, -0.418306112347528]])
 
         np.testing.assert_allclose(result, expected)
 
@@ -134,9 +143,10 @@ class TestAqd(unittest.TestCase):
                                                   'XYZ')
 
         result = np.hstack((u, v, w))
-        expected = np.array([[0.520000000000000, 0.230000000000000, 0.120000000000000],
-                             [0.558771983800901, 0.142329791902643, 0.0722225758067118],
-                             [-0.495456501337512, 0.253945766296246, 0.166536491684568]])
+        expected = np.array([
+            [0.520000000000000, 0.230000000000000, 0.120000000000000],
+            [0.558771983800901, 0.142329791902643, 0.0722225758067118],
+            [-0.495456501337512, 0.253945766296246, 0.166536491684568]])
 
         np.testing.assert_allclose(result, expected)
 
@@ -157,11 +167,45 @@ class TestAqd(unittest.TestCase):
                                                   'XYZ')
 
         result = np.hstack((u, v, w))
-        expected = np.array([[-0.520000000000000, 0.230000000000000, -0.120000000000000],
-                             [-0.479197782595360, 0.308957928704944, -0.112314217470635],
-                             [0.144416971478138, -0.548502906329893, -0.126444850020645]])
+        expected = np.array([
+            [-0.520000000000000, 0.230000000000000, -0.120000000000000],
+            [-0.479197782595360, 0.308957928704944, -0.112314217470635],
+            [0.144416971478138, -0.548502906329893, -0.126444850020645]])
 
         np.testing.assert_allclose(result, expected)
+
+    def test_set_orientation(self):
+        depth = 2 + np.sin(
+            np.linspace(0, 2*np.pi, np.shape(self.ds['time'])[0]))
+        bindist = np.array([.3, .4, .5, .6, .7])
+        self.ds['Pressure_ac'] = xr.DataArray(depth, dims='time')
+        self.ds['bindist'] = xr.DataArray(bindist, dims='bindist')
+        self.ds.attrs['transducer_offset_from_bottom'] = 0.15
+
+        self.ds.attrs['orientation'] = 'UP'
+        result, T, T_orig = stglib.aqd.qaqc.set_orientation(self.ds, self.T)
+        np.testing.assert_almost_equal(depth.mean()-bindist,
+                                       result['depth'].values)
+
+        self.ds.attrs['orientation'] = 'DOWN'
+        result, T, T_orig = stglib.aqd.qaqc.set_orientation(self.ds, self.T)
+        np.testing.assert_almost_equal(depth.mean()+bindist,
+                                       result['depth'].values)
+
+        self.ds.attrs['NAVD88_ref'] = -0.87
+        self.ds.attrs['orientation'] = 'UP'
+        result, T, T_orig = stglib.aqd.qaqc.set_orientation(self.ds, self.T)
+        np.testing.assert_almost_equal(
+            -self.ds.attrs['NAVD88_ref']
+            - self.ds.attrs['transducer_offset_from_bottom']
+            - bindist, result['depth'].values)
+
+        self.ds.attrs['orientation'] = 'DOWN'
+        result, T, T_orig = stglib.aqd.qaqc.set_orientation(self.ds, self.T)
+        np.testing.assert_almost_equal(
+            -self.ds.attrs['NAVD88_ref']
+            - self.ds.attrs['transducer_offset_from_bottom']
+            + bindist, result['depth'].values)
 
 
 class TestWavesUtils(unittest.TestCase):

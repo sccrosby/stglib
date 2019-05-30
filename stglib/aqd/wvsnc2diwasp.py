@@ -25,8 +25,8 @@ def nc_to_diwasp(nc_filename, format='NETCDF3_64BIT'):
     # FIXME: Why is this?
     _, idx = np.unique(dirs, return_index=True)
 
-    ds['direction'] = xr.DataArray(dirs[idx], dims=('direction'),
-                                   encoding={'_FillValue': None})
+    ds['direction'] = xr.DataArray(dirs[idx], dims=('direction'))
+    ds['direction'].encoding['_FillValue'] = None
 
     ds['dspec'] = xr.DataArray(mat['dspec'][:, idx, :],
                                dims=('time', 'direction', 'frequency'))
@@ -49,9 +49,10 @@ def nc_to_diwasp(nc_filename, format='NETCDF3_64BIT'):
 
     ds['pspec'] = xr.DataArray(pspec, dims=('time', 'frequency'))
 
-    ds['wd_4062'] = xr.DataArray(waves.make_mwd(ds['frequency'].values,
-                                                ds['direction'].values,
-                                                ds['dspec'].values),
+    ds['wd_4062'] = xr.DataArray(waves.polar2compass(waves.to2from(
+                                     waves.make_mwd(ds['frequency'].values,
+                                                    ds['direction'].values,
+                                                    ds['dspec'].values))),
                                  dims='time')
 
     # ds = utils.create_water_depth(ds)

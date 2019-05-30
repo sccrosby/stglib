@@ -3,7 +3,7 @@
 import stglib
 import yaml
 
-args = stglib.cmd.hlmcsv2cdf_parser().parse_args()
+args = stglib.cmd.iqmat2cdf_parser().parse_args()
 
 # initialize metadata from the globalatts file
 metadata = stglib.read_globalatts(args.gatts)
@@ -15,4 +15,4 @@ with open(args.config) as f:
 for k in config:
     metadata[k] = config[k]
 
-RAW = stglib.hobo.csv_to_cdf(metadata)
+RAW = stglib.iq.mat_to_cdf(metadata)

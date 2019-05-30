@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from .core import utils
+from . import exo
 
 
 def read_par(filnam, spb=False, skiprows=None, skipfooter=0):
@@ -64,13 +65,13 @@ def read_ntu(filnam, spb=False, skiprows=None, skipfooter=0):
 def read_eco_csv(filnam, names, skiprows=None, skipfooter=0):
 
     return pd.read_csv(filnam,
-                      sep='\t',
-                      names=names,
-                      parse_dates=[['date', 'time']],
-                      infer_datetime_format=True,
-                      engine='python',
-                      skiprows=skiprows,
-                      skipfooter=skipfooter)
+                       sep='\t',
+                       names=names,
+                       parse_dates=[['date', 'time']],
+                       infer_datetime_format=True,
+                       engine='python',
+                       skiprows=skiprows,
+                       skipfooter=skipfooter)
 
 
 def eco_pd_to_xr(df, spb=False):
@@ -157,16 +158,22 @@ def cdf_to_nc(cdf_filename, atmpres=False):
     if 'par' in ds.attrs['INST_TYPE'].lower():
         ds['PAR_905'] = ds.attrs['Im'] * 10 ** ((ds['counts'].mean(dim='sample') - ds.attrs['a0']) / ds.attrs['a1'])
         ds['PAR_905'].attrs['units'] = 'umol m-2 s-1'
-        ds['PAR_905'].attrs['long_name'] = 'Photosynthetically active radiation'
+        ds['PAR_905'].attrs['long_name'] = ('Photosynthetically active '
+                                            'radiation')
 
     if 'ntu' in ds.attrs['INST_TYPE'].lower():
         if 'user_ntucal_coeffs' in ds.attrs:
-            ds['Turb'] = xr.DataArray(np.polyval(ds.attrs['user_ntucal_coeffs'], ds['counts'].mean(dim='sample')), dims='time')
+            ds['Turb'] = xr.DataArray(
+                np.polyval(ds.attrs['user_ntucal_coeffs'], ds['counts']),
+                dims=['time', 'sample']).mean(dim='sample')
             ds['Turb'].attrs['units'] = 'NTU'
             ds['Turb'].attrs['long_name'] = 'Turbidity'
-            ds['Turb_std'] = xr.DataArray(np.polyval(ds.attrs['user_ntucal_coeffs'], ds['counts'].std(dim='sample')), dims='time')
-            ds['Turb'].attrs['units'] = 'NTU'
-            ds['Turb'].attrs['long_name'] = 'Turbidity burst standard deviation'
+            ds['Turb_std'] = xr.DataArray(
+                np.polyval(ds.attrs['user_ntucal_coeffs'], ds['counts']),
+                dims=['time', 'sample']).std(dim='sample')
+            ds['Turb_std'].attrs['units'] = 'NTU'
+            ds['Turb_std'].attrs['long_name'] = ('Turbidity burst standard '
+                                                 'deviation')
 
     ds = ds.drop(['counts', 'sample'])
 
@@ -178,6 +185,8 @@ def cdf_to_nc(cdf_filename, atmpres=False):
     # assign min/max:
     ds = utils.add_min_max(ds)
 
+    ds = utils.add_start_stop_time(ds)
+
     ds = utils.create_epic_times(ds)
 
     ds = eco_add_delta_t(ds)
@@ -187,10 +196,13 @@ def cdf_to_nc(cdf_filename, atmpres=False):
 
     ds = ds_add_attrs(ds)
 
+    ds = utils.no_p_create_depth(ds)
+
     # add lat/lon coordinates to each variable
     for var in ds.variables:
         if (var not in ds.coords) and ('time' not in var):
             ds = utils.add_lat_lon(ds, var)
+            ds = utils.no_p_add_depth(ds, var)
             # cast as float32
             ds = utils.set_var_dtype(ds, var)
 
@@ -242,6 +254,8 @@ def ds_add_attrs(ds):
         if (var not in ds.coords) and ('time' not in var):
             add_attributes(ds[var], ds.attrs)
 
+    ds.attrs['COMPOSITE'] = np.int32(0)
+
     return ds
 
 
@@ -251,6 +265,20 @@ def eco_qaqc(ds):
         for var in ['Turb']:
             ds = trim_max_std(ds, var)
 
+            ds = exo.trim_min(ds, var)
+
+            ds = exo.trim_max(ds, var)
+
+            ds = exo.trim_min_diff(ds, var)
+
+            ds = exo.trim_max_diff(ds, var)
+
+            ds = exo.trim_med_diff(ds, var)
+
+            ds = exo.trim_med_diff_pct(ds, var)
+
+            ds = exo.trim_bad_ens(ds, var)
+
     return ds
 
 
@@ -258,20 +286,11 @@ def trim_max_std(ds, var):
     if var + '_std_max' in ds.attrs:
         print('%s: Trimming using maximum standard deviation of %f' %
               (var, ds.attrs[var + '_std_max']))
-        ds[var][ds[var] > ds.attrs[var + '_std_max']] = np.nan
+        ds[var][ds['Turb_std'] > ds.attrs[var + '_std_max']] = np.nan
 
-        notetxt = ('Values filled where standard deviation greater than %f units. ' %
-                   ds.attrs[var + '_std_max'])
+        notetxt = ('Values filled where standard deviation greater than %f '
+                   'units. ' % ds.attrs[var + '_std_max'])
 
-        ds = insert_note(ds, var, notetxt)
-
-    return ds
-
-
-def insert_note(ds, var, notetxt):
-    if 'note' in ds[var].attrs:
-        ds[var].attrs['note'] = notetxt + ds[var].attrs['note']
-    else:
-        ds[var].attrs.update({'note': notetxt})
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds

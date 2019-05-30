@@ -30,7 +30,6 @@ def prf_to_cdf(metadata):
 
     # write out metadata first, then deal exclusively with xarray attrs
     ds = utils.write_metadata(ds, metadata)
-    ds = utils.write_metadata(ds, metadata['instmeta'])
 
     del metadata
     del instmeta
@@ -46,7 +45,12 @@ def prf_to_cdf(metadata):
     # Compute time stamps
     ds = utils.shift_time(ds, ds.attrs['AQDAverageInterval']/2)
 
-    if (not 'cf' in ds.attrs) or (ds.attrs['cf'] != '1.6'):
+    if (
+        ('cf' in ds.attrs and str(ds.attrs['cf']) == '1.6') or
+        ('CF' in ds.attrs and str(ds.attrs['CF']) == '1.6')
+       ):
+        pass
+    else:
         print('about to create epic times')
         ds = utils.create_epic_times(ds)
 

@@ -55,7 +55,7 @@ def read_exo(filnam, skiprows=25, encoding='utf-8'):
     hdr = read_exo_header(filnam, encoding=encoding)
     exo.attrs['serial_number'] = hdr['serial_number']
     exo.attrs['INST_TYPE'] = 'YSI EXO2 Multiparameter Sonde'
-    exo.attrs['COMPOSITE'] = 0
+    exo.attrs['COMPOSITE'] = np.int32(0)
 
     # Apply sensor serial numbers to each sensor
     for k in exo.variables:
@@ -161,6 +161,8 @@ def cdf_to_nc(cdf_filename, atmpres=False):
     # assign min/max:
     ds = utils.add_min_max(ds)
 
+    ds = utils.add_start_stop_time(ds)
+
     ds = utils.create_epic_times(ds)
 
     ds = exo_add_delta_t(ds)
@@ -173,14 +175,13 @@ def cdf_to_nc(cdf_filename, atmpres=False):
     # ds = utils.create_water_depth(ds)
     ds = utils.create_nominal_instrument_depth(ds)
 
-    ds = exo_create_depth(ds)
+    ds = utils.no_p_create_depth(ds)
 
     # add lat/lon coordinates to each variable
     for var in ds.variables:
         if (var not in ds.coords) and ('time' not in var):
             ds = utils.add_lat_lon(ds, var)
-            if 'P_1' not in var:
-                ds = exo_add_depth(ds, var)
+            ds = utils.no_p_add_depth(ds, var)
             # cast as float32
             ds = utils.set_var_dtype(ds, var)
 
@@ -316,7 +317,7 @@ def ds_add_attrs(ds):
                                   'name': 'Pac',
                                   'long_name': 'Corrected pressure'})
         if 'P_1ac_note' in ds.attrs:
-            ds['P_1ac'].attrs.update({'note': ds.attrs['P_1ac_note']})
+            ds = utils.insert_note(ds, 'P_1ac', ds.attrs['P_1ac_note'] + ' ')
 
     def add_attributes(var, dsattrs):
         var.attrs.update({
@@ -364,7 +365,24 @@ def exo_qaqc(ds):
     Trim EXO data based on metadata
     """
 
-    for var in ['C_51', 'SpC_48', 'S_41', 'Turb', 'fDOMRFU', 'fDOMQSU', 'CHLrfu', 'Fch_906', 'BGAPErfu', 'BGAPE']:
+    # S_41 needs to be first in list for trim_by_salinity()
+    for var in ['S_41',
+                'C_51',
+                'SpC_48',
+                'T_28',
+                'Turb',
+                'fDOMRFU',
+                'fDOMQSU',
+                'CHLrfu',
+                'Fch_906',
+                'BGAPErfu',
+                'BGAPE',
+                'OST_62',
+                'DO',
+                'pH_159',
+                'pHmV',
+                'P_1ac',
+                'P_1']:
         ds = trim_min(ds, var)
 
         ds = trim_max(ds, var)
@@ -379,6 +397,8 @@ def exo_qaqc(ds):
 
         ds = trim_bad_ens(ds, var)
 
+        ds = trim_by_salinity(ds, var)  # this must come last
+
     return ds
 
 
@@ -391,7 +411,7 @@ def trim_min(ds, var):
         notetxt = ('Values filled where less than %f units. ' %
                    ds.attrs[var + '_min'])
 
-        ds = insert_note(ds, var, notetxt)
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
@@ -405,7 +425,7 @@ def trim_max(ds, var):
         notetxt = ('Values filled where greater than %f units. ' %
                    ds.attrs[var + '_max'])
 
-        ds = insert_note(ds, var, notetxt)
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
@@ -421,7 +441,7 @@ def trim_min_diff(ds, var):
                    'units in a single time step. ' %
                    ds.attrs[var + '_min_diff'])
 
-        ds = insert_note(ds, var, notetxt)
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
@@ -437,7 +457,7 @@ def trim_max_diff(ds, var):
                    'units in a single time step. ' %
                    ds.attrs[var + '_max_diff'])
 
-        ds = insert_note(ds, var, notetxt)
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
@@ -459,7 +479,7 @@ def trim_med_diff(ds, var):
                    '%f. ' %
                    (kernel_size, ds.attrs[var + '_med_diff']))
 
-        ds = insert_note(ds, var, notetxt)
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
@@ -482,7 +502,7 @@ def trim_med_diff_pct(ds, var):
                    'than %f. ' %
                    (kernel_size, ds.attrs[var + '_med_diff_pct']))
 
-        ds = insert_note(ds, var, notetxt)
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
@@ -506,42 +526,23 @@ def trim_bad_ens(ds, var):
             notetxt = "Data clipped using bad_ens values of %s. " % (
                 str(ds.attrs[var + '_bad_ens']))
 
-            ds = insert_note(ds, var, notetxt)
+            ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
 
-def insert_note(ds, var, notetxt):
-    if 'note' in ds[var].attrs:
-        ds[var].attrs['note'] = notetxt + ds[var].attrs['note']
-    else:
-        ds[var].attrs.update({'note': notetxt})
+def trim_by_salinity(ds, var):
+    if 'trim_by_salinity' in ds.attrs and ds.attrs['trim_by_salinity'].lower() == 'true':  # xarray doesn't support writing attributes as booleans
+        if 'trim_by_salinity_exclude' in ds.attrs and var in ds.attrs['trim_by_salinity_exclude']:
+            pass
+        else:
+            print('%s: Trimming using valid salinity threshold' % var)
+            ds[var][ds['S_41'].isnull()] = np.nan
 
-    return ds
+            if var != 'S_41':
+                notetxt = 'Values filled using valid salinity threshold. '
 
-
-def exo_create_depth(ds):
-
-    depth = ds.attrs['WATER_DEPTH'] - ds.attrs['initial_instrument_height']
-    ds['depth'] = xr.DataArray([depth], dims='depth')
-    ds['depth'].attrs['positive'] = 'down'
-    ds['depth'].attrs['axis'] = 'z'
-    ds['depth'].attrs['units'] = 'm'
-    ds['depth'].attrs['epic_code'] = 3
-    ds['depth'].encoding['_FillValue'] = 1e35
-
-    return ds
-
-
-def exo_add_depth(ds, var):
-    ds[var] = xr.concat([ds[var]], dim=ds['depth'])
-
-    # Reorder so lat, lon are at the end.
-    dims = [d for d in ds[var].dims if (d != 'depth')]
-    dims.extend(['depth'])
-    dims = tuple(dims)
-
-    ds[var] = ds[var].transpose(*dims)
+                ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 

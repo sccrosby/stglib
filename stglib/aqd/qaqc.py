@@ -102,9 +102,10 @@ def add_delta_t(ds, waves=False):
 
 
 def make_tilt(p, r):
-    return np.array([[math.cos(p), -math.sin(p)*math.sin(r), -math.cos(r)*math.sin(p)],
-                     [0,           math.cos(r),              -math.sin(r)],
-                     [math.sin(p),  math.sin(r)*math.cos(p),  math.cos(p)*math.cos(r)]])
+    return np.array([
+        [math.cos(p), -math.sin(p)*math.sin(r), -math.cos(r)*math.sin(p)],
+        [0,           math.cos(r),              -math.sin(r)],
+        [math.sin(p),  math.sin(r)*math.cos(p),  math.cos(p)*math.cos(r)]])
 
 
 def coord_transform(vel1, vel2, vel3, heading, pitch, roll, T, T_orig, cs):
@@ -132,9 +133,9 @@ def coord_transform(vel1, vel2, vel3, heading, pitch, roll, T, T_orig, cs):
             pp = np.pi * pitch[i] / 180
             rr = np.pi * roll[i] / 180
 
-            H = np.array([[ math.cos(hh), math.sin(hh), 0],
+            H = np.array([[math.cos(hh),  math.sin(hh), 0],
                           [-math.sin(hh), math.cos(hh), 0],
-                          [ 0,          0,          1]])
+                          [0,             0,            1]])
 
             # make tilt matrix
             P = make_tilt(pp, rr)
@@ -143,7 +144,8 @@ def coord_transform(vel1, vel2, vel3, heading, pitch, roll, T, T_orig, cs):
             R = np.dot(np.dot(H, P), T)
             if cs == 'XYZ':
                 for j in range(M):
-                    vel = np.dot(np.dot(R, np.linalg.inv(T_orig)),
+                    vel = np.dot(
+                        np.dot(R, np.linalg.inv(T_orig)),
                         np.array([vel1[i, j], vel2[i, j], vel3[i, j]]).T)
                     u[i, j] = vel[0]
                     v[i, j] = vel[1]
@@ -174,25 +176,24 @@ def set_orientation(VEL, T):
     else:
         presvar = 'Pressure'
 
-    Wdepth = (np.nanmean(VEL[presvar]) +
-              VEL.attrs['transducer_offset_from_bottom'])
+    if 'NAVD88_ref' in VEL.attrs:
+        Wdepth = (-VEL.attrs['NAVD88_ref'] -
+                  VEL.attrs['transducer_offset_from_bottom'])
+    else:
+        Wdepth = np.nanmean(VEL[presvar])
 
     T_orig = T.copy()
 
     if VEL.attrs['orientation'] == 'UP':
         print('User instructed that instrument was pointing UP')
         # try a simpler approach
-        VEL['depth'] = xr.DataArray(Wdepth -
-            (VEL['bindist'] + VEL.attrs['transducer_offset_from_bottom']),
-            dims='bindist')
+        VEL['depth'] = xr.DataArray(Wdepth - VEL['bindist'], dims='bindist')
     elif VEL.attrs['orientation'] == 'DOWN':
         print('User instructed that instrument was pointing DOWN')
         T[1, :] = -T[1, :]
         T[2, :] = -T[2, :]
         # try a simpler approach
-        VEL['depth'] = xr.DataArray(Wdepth -
-            VEL.attrs['transducer_offset_from_bottom'] + VEL['bindist'],
-            dims='bindist')
+        VEL['depth'] = xr.DataArray(Wdepth + VEL['bindist'], dims='bindist')
 
     return VEL, T, T_orig
 
@@ -240,7 +241,7 @@ def magvar_correct(ds):
 
 def rotate(u, v, deg):
     rad = np.deg2rad(deg)
-    urot =  u * np.cos(rad) + v * np.sin(rad)
+    urot = u * np.cos(rad) + v * np.sin(rad)
     vrot = -u * np.sin(rad) + v * np.cos(rad)
 
     return urot, vrot
@@ -265,8 +266,8 @@ def trim_vel(ds, waves=False, data_vars=['U', 'V', 'W', 'AGC']):
     """
 
     if ('trim_method' in ds.attrs and
-           ds.attrs['trim_method'].lower() != 'none' and
-           ds.attrs['trim_method'] is not None):
+            ds.attrs['trim_method'].lower() != 'none' and
+            ds.attrs['trim_method'] is not None):
 
         if 'Pressure_ac' in ds:
             print('Using atmospherically corrected pressure to trim')
@@ -296,7 +297,7 @@ def trim_vel(ds, waves=False, data_vars=['U', 'V', 'W', 'AGC']):
                 ds.attrs['history'])
         elif ds.attrs['trim_method'].lower() == 'bin range':
             print('Trimming using good_bins of %s' %
-                str(ds.attrs['good_bins']))
+                  str(ds.attrs['good_bins']))
             for var in data_vars:
                 ds[var] = ds[var].isel(bindist=slice(ds.attrs['good_bins'][0],
                                                      ds.attrs['good_bins'][1]))
@@ -304,7 +305,8 @@ def trim_vel(ds, waves=False, data_vars=['U', 'V', 'W', 'AGC']):
         # find first bin that is all bad values
         # there might be a better way to do this using xarray and named
         # dimensions, but this works for now
-        lastbin = np.argmin(np.all(np.isnan(ds[data_vars[0]].values), axis=0) == False)
+        lastbin = np.argmin(
+            np.all(np.isnan(ds[data_vars[0]].values), axis=0) == False)
 
         # this trims so there are no all-nan rows in the data
         ds = ds.isel(bindist=slice(0, lastbin))
@@ -703,49 +705,6 @@ def update_attrs(ds, waves=False):
 
     return ds
 
-    # RAW['AnalogInput1']
-
-    # with Dataset(cdf_filename, 'w', format='NETCDF4', clobber=True) as rg:
-    #
-    #     # write out EPIC metadata
-    #     write_metadata(rg, RAW['instmeta']) #TODO
-    #
-    #     if waves:
-    #         burstid = rg.createVariable('burst', 'i', ('time',), fill_value=False)
-    #         burstid.units = 'count'
-    #         burstid.long_name = 'Record Number'
-    #
-    #
-    #
-    #     if waves:
-    #         AMP1id = rg.createVariable('AMP1', 'f', ('sample', 'time',), fill_value=False)
-    #     else:
-    #         AMP1id = rg.createVariable('AMP1', 'f', ('depth', 'time',), fill_value=False)
-    #
-    # FIXME: add analoginput stuff
-    #     for n in ['1', '2']:
-    #         if 'AnalogInput' + n in metadata:
-    #             Anaid = rg.createVariable('AnalogInput' + n, 'f', ('time',), fill_value=False)
-    #             Anaid.units = 'Volts'
-    #             Anaid.sensor_type = metadata['AnalogInput1']['sensor_type']
-    #             Anaid.sensor_manufacturer = metadata['AnalogInput1']['sensor_manufacturer']
-    #             Anaid.sensor_model = metadata['AnalogInput1']['sensor_model']
-    #             Anaid.serial_number = metadata['AnalogInput1']['serial_number']
-    #
-    #             if 'initial_sensor_height' in metadata['AnalogInput' + n]:
-    #                 # TODO
-    #                 # metadata.AnalogInput1.nominal_sensor_depth = metadata.WATER_DEPTH - metadata.AnalogInput1.initial_sensor_height;
-    #                 # netcdf.putAtt(ncid,Ana1id,'initial_sensor_height',metadata.AnalogInput1.initial_sensor_height);
-    #                 # netcdf.putAtt(ncid,Ana1id,'nominal_sensor_depth',metadata.AnalogInput1.nominal_sensor_depth);
-    #                 continue
-    #             elif 'nominal_sensor_depth' in metadata['AnalogInput' + n]: # TODO: should be another if not elif??
-    #                 # netcdf.putAtt(ncid,Ana1id,'nominal_sensor_depth',metadata.AnalogInput1.nominal_sensor_depth);
-    #                 # metadata.AnalogInput1.initial_sensor_height = metadata.WATER_DEPTH - metadata.AnalogInput1.nominal_sensor_depth;
-    #                 # netcdf.putAtt(ncid,Ana1id,'initial_sensor_height',metadata.AnalogInput1.initial_sensor_height);
-    #                 continue
-    #
-    #         # if isfield(metadata.AnalogInput1,'range'),
-
 
 def ds_add_attrs(ds, waves=False):
     """
@@ -773,7 +732,7 @@ def ds_add_attrs(ds, waves=False):
              'sensor_type': dsattrs['INST_TYPE']})
         var.encoding['_FillValue'] = 1e35
 
-    ds.attrs.update({'COMPOSITE': 0})
+    ds.attrs['COMPOSITE'] = np.int32(0)
 
     # Update attributes for EPIC and STG compliance
     ds = utils.ds_coord_no_fillvalue(ds)
@@ -807,6 +766,12 @@ def ds_add_attrs(ds, waves=False):
          'initial_instrument_height': ds.attrs['initial_instrument_height'],
          'nominal_instrument_depth': ds.attrs['nominal_instrument_depth'],
          'epic_code': 3})
+
+    if 'NAVD88_ref' in ds.attrs:
+        ds['depth'].attrs['VERT_DATUM'] = 'NAVD88'
+        ds['depth'].attrs['NOTE'] = ('Computed as platform depth [m NAVD88] '
+                                     '- initial_instrument_height - bin '
+                                     'distance from transducer')
 
     if not waves:
         ds['u_1205'].attrs.update(
@@ -898,10 +863,16 @@ def ds_add_attrs(ds, waves=False):
          'name': 'bin depth'})
 
     if 'P_1ac' in ds:
-        ds['bin_depth'].attrs['note'] = ('Actual depth time series of '
-                                         'velocity bins. Calculated as '
-                                         'corrected pressure (P_1ac) - '
-                                         'bindist.')
+        if waves:
+            ds['bin_depth'].attrs['note'] = ('Actual depth time series of '
+                                             'wave burst bin depths. '
+                                             'Calculated as corrected '
+                                             'pressure (P_1ac) - bindist.')
+        else:
+            ds['bin_depth'].attrs['note'] = ('Actual depth time series of '
+                                             'velocity bins. Calculated as '
+                                             'corrected pressure (P_1ac) - '
+                                             'bindist.')
     else:
         ds['bin_depth'].attrs.update(
             {'note': ('Actual depth time series of velocity bins. Calculated '

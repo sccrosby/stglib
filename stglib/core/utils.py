@@ -10,6 +10,8 @@ import xarray as xr
 import numpy as np
 import scipy.io as spio
 import pandas as pd
+import sqlite3
+import stglib
 
 
 def clip_ds(ds, wvs=False):
@@ -21,8 +23,10 @@ def clip_ds(ds, wvs=False):
     because AQD waves can have a different sampling interval than AQD currents
     """
 
-    print('first burst in full file:', ds['time'].min().values)
-    print('last burst in full file:', ds['time'].max().values)
+    print('first burst in full file: {}, idx {}'.format(
+        ds['time'].min().values, ds['time'].argmin().values))
+    print('last burst in full file: {}, idx {}'.format(
+        ds['time'].max().values, ds['time'].argmax().values))
 
     # clip either by ensemble indices or by the deployment and recovery
     # date specified in metadata
@@ -43,7 +47,7 @@ def clip_ds(ds, wvs=False):
 
         ds = ds.isel(time=goods)
 
-        histtext = 'Data clipped using good_ens values of %s . ' % (
+        histtext = 'Data clipped using good_ens values of {} . '.format(
             str(good_ens))
 
         ds = insert_history(ds, histtext)
@@ -56,7 +60,7 @@ def clip_ds(ds, wvs=False):
 
         ds = ds.isel(time=goods)
 
-        histtext = 'Data clipped using good_ens_wvs values of %s . ' % (
+        histtext = 'Data clipped using good_ens_wvs values of {} . '.format(
             str(good_ens))
 
         ds = insert_history(ds, histtext)
@@ -65,10 +69,18 @@ def clip_ds(ds, wvs=False):
         # clip by start/end dates that are not Deployment_date
         # and Recovery_date
         print('Clipping data using good_dates')
+
+        where = np.where(
+            (ds['time'].values >= np.datetime64(ds.attrs['good_dates'][0])) &
+            (ds['time'].values <= np.datetime64(ds.attrs['good_dates'][1])))[0]
+        print('good_dates[0] {}, idx {}'.format(
+            ds.attrs['good_dates'][0], where.min()))
+        print('good_dates[1] {}, idx {}'.format(
+            ds.attrs['good_dates'][1], where.max()))
         ds = ds.sel(time=slice(ds.attrs['good_dates'][0],
                                ds.attrs['good_dates'][1]))
 
-        histtext = 'Data clipped using good_dates of %s . ' % (
+        histtext = 'Data clipped using good_dates of {} . '.format(
             ds.attrs['good_dates'])
 
         ds = insert_history(ds, histtext)
@@ -79,17 +91,22 @@ def clip_ds(ds, wvs=False):
         ds = ds.sel(time=slice(ds.attrs['Deployment_date'],
                                ds.attrs['Recovery_date']))
 
-        histtext = ('Data clipped using Deployment_date of %s and '
-                    'Recovery_date of %s. ') % (ds.attrs['Deployment_date'],
-                                                ds.attrs['Recovery_date'])
+        histtext = ('Data clipped using Deployment_date of {} and '
+                    'Recovery_date of {}. ').format(
+                    ds.attrs['Deployment_date'], ds.attrs['Recovery_date'])
 
         ds = insert_history(ds, histtext)
     else:
         # do nothing
         print('Did not clip data; no values specified in metadata')
 
-    print('first burst in trimmed file:', ds['time'].min().values)
-    print('last burst in trimmed file:', ds['time'].max().values)
+    try:
+        print('first burst in trimmed file:', ds['time'].min().values)
+        print('last burst in trimmed file:', ds['time'].max().values)
+    except ValueError as e:
+        raise(ValueError('No valid time values in trimmed dataset. Are you '
+                         'sure you sure you specified Deployment and Recovery '
+                         'dates correctly?'))
 
     return ds
 
@@ -103,7 +120,6 @@ def add_min_max(ds):
     exclude = list(ds.dims)
     [exclude.append(k) for k in ds.variables if 'time' in k]
     exclude.extend(['TIM', 'TransMatrix'])
-
 
     alloweddims = ['time', 'sample', 'depth']
 
@@ -129,10 +145,15 @@ def insert_history(ds, histtext):
 
 
 def add_history(ds):
-    if (not 'cf' in ds.attrs) or (ds.attrs['cf'] != '1.6'):
-        histtext = 'Processed to EPIC using %s. ' % os.path.basename(sys.argv[0])
-    elif ds.attrs['cf'] == '1.6':
-        histtext = 'Processed to CF using %s. ' % os.path.basename(sys.argv[0])
+    if (
+        ('cf' in ds.attrs and str(ds.attrs['cf']) == '1.6') or
+        ('CF' in ds.attrs and str(ds.attrs['CF']) == '1.6')
+       ):
+        histtext = 'Processed to CF using {}. '.format(
+            os.path.basename(sys.argv[0]))
+    else:
+        histtext = 'Processed to EPIC using {}. '.format(
+            os.path.basename(sys.argv[0]))
 
     return insert_history(ds, histtext)
 
@@ -294,8 +315,8 @@ def trim_max_wp(ds):
     """
 
     if 'wp_max' in ds.attrs:
-        print('Trimming using maximum period of %f seconds'
-              % ds.attrs['wp_max'])
+        print('Trimming using maximum period of {} seconds'.format(
+            ds.attrs['wp_max']))
         for var in ['wp_peak', 'wp_4060']:
             ds[var] = ds[var].where(
                     (ds['wp_peak'] < ds.attrs['wp_max']) &
@@ -303,8 +324,8 @@ def trim_max_wp(ds):
                     )
 
         for var in ['wp_peak', 'wp_4060']:
-            notetxt = 'Values filled where wp_peak, wp_4060 >= %f. ' \
-                      % ds.attrs['wp_max']
+            notetxt = 'Values filled where wp_peak, wp_4060 >= {}. '.format(
+                ds.attrs['wp_max'])
 
             if 'note' in ds[var].attrs:
                 ds[var].attrs['note'] = notetxt + ds[var].attrs['note']
@@ -321,13 +342,13 @@ def trim_min_wh(ds):
     """
 
     if 'wh_min' in ds.attrs:
-        print('Trimming using minimum wave height of %f m'
-              % ds.attrs['wh_min'])
+        print('Trimming using minimum wave height of {} m'.format(
+            ds.attrs['wh_min']))
         for var in ['wp_peak', 'wh_4061', 'wp_4060']:
             ds[var] = ds[var].where(ds['wh_4061'] > ds.attrs['wh_min'])
 
-            notetxt = 'Values filled where wh_4061 <= %f. ' \
-                      % ds.attrs['wh_min'] + '. '
+            notetxt = 'Values filled where wh_4061 <= {}. '.format(
+                ds.attrs['wh_min'])
 
             if 'note' in ds[var].attrs:
                 ds[var].attrs['note'] = notetxt + ds[var].attrs['note']
@@ -344,13 +365,13 @@ def trim_max_wh(ds):
     """
 
     if 'wh_max' in ds.attrs:
-        print('Trimming using maximum wave height of %f m'
-              % ds.attrs['wh_max'])
+        print('Trimming using maximum wave height of {} m'.format(
+            ds.attrs['wh_max']))
         for var in ['wp_peak', 'wh_4061', 'wp_4060']:
             ds[var] = ds[var].where(ds['wh_4061'] < ds.attrs['wh_max'])
 
-            notetxt = 'Values filled where wh_4061 >= %f. ' \
-                      % ds.attrs['wh_max']
+            notetxt = 'Values filled where wh_4061 >= {}. '.format(
+                ds.attrs['wh_max'])
 
             if 'note' in ds[var].attrs:
                 ds[var].attrs['note'] = notetxt + ds[var].attrs['note']
@@ -374,8 +395,8 @@ def trim_wp_ratio(ds):
                 ds['wp_peak']/ds['wp_4060'] < ds.attrs['wp_ratio'])
 
         for var in ['wp_peak', 'wp_4060']:
-            notetxt = 'Values filled where wp_peak:wp_4060 >= %f' \
-                      % ds.attrs['wp_ratio'] + '. '
+            notetxt = 'Values filled where wp_peak:wp_4060 >= {}. '.format(
+                ds.attrs['wp_ratio'])
 
             if 'note' in ds[var].attrs:
                 ds[var].attrs['note'] = notetxt + ds[var].attrs['note']
@@ -389,16 +410,18 @@ def write_metadata(ds, metadata):
     """Write out all metadata to CDF file"""
 
     for k in metadata:
-        # don't want to write out instmeta dict, call it separately
-        if k != 'instmeta':
+        # recursively write out instmeta
+        if k == 'instmeta':
+            ds.attrs.update({x: metadata[k][x] for x in metadata[k]})
+        else:
             ds.attrs.update({k: metadata[k]})
 
     f = os.path.basename(inspect.stack()[1][1])
 
-    histtext = ('Processed using ' + f + ' with Python ' +
-                platform.python_version() + ', xarray ' + xr.__version__ +
-                ', NumPy ' + np.__version__ + ', netCDF4 ' +
-                netCDF4.__version__ + '. ')
+    histtext = ('Processed using {} with stglib {}, xarray {}, NumPy {}, '
+                'netCDF4 {}, Python {}. ').format(f, stglib.__version__,
+                xr.__version__, np.__version__, netCDF4.__version__,
+                platform.python_version())
 
     ds = insert_history(ds, histtext)
 
@@ -417,54 +440,70 @@ def rename_time(ds):
     Rename time variables for EPIC compliance, keeping a time_cf coorindate.
     """
 
-    # nc = netCDF4.Dataset(nc_filename, 'r+')
-    # timebak = nc['epic_time'][:]
-    # nc.renameVariable('time', 'time_cf')
-    # nc.renameVariable('epic_time', 'time')
-    # nc.renameVariable('epic_time2', 'time2')
-    # nc.close()
-    #
-    # # need to do this in two steps after renaming the variable
-    # # not sure why, but it works this way
-    # nc = netCDF4.Dataset(nc_filename, 'r+')
-    # nc['time'][:] = timebak
-    # nc.close()
-
-    ds = ds.rename({'time': 'time_cf'})
-    ds = ds.rename({'epic_time': 'time'})
-    ds = ds.rename({'epic_time2': 'time2'})
-    ds = ds.set_coords(['time', 'time2'])
-    ds = ds.swap_dims({'time_cf': 'time'})
-    # output int32 time_cf for THREDDS compatibility
-    ds['time_cf'].encoding['dtype'] = 'i4'
+    if (
+        ('cf' in ds.attrs and str(ds.attrs['cf']) == '1.6') or
+        ('CF' in ds.attrs and str(ds.attrs['CF']) == '1.6')
+       ):
+        pass
+    else:
+        ds = ds.rename({'time': 'time_cf'})
+        ds = ds.rename({'epic_time': 'time'})
+        ds = ds.rename({'epic_time2': 'time2'})
+        ds = ds.set_coords(['time', 'time2'])
+        ds = ds.swap_dims({'time_cf': 'time'})
+        # output int32 time_cf for THREDDS compatibility
+        ds['time_cf'].encoding['dtype'] = 'i4'
 
     return ds
 
 
-def rename_time_2d(nc_filename):
-    # Need to do this in two steps after renaming the variable.
-    # Not sure why, but it works this way.
-    with netCDF4.Dataset(nc_filename, 'r+') as nc:
-        nc.renameVariable('time', 'time_cf')
-        # nc.renameVariable('time_2d', 'time_cf_2d')
-        timebak = nc['epic_time_2d'][:]
-        nc.renameVariable('epic_time_2d', 'time')
-        nc.renameVariable('epic_time2_2d', 'time2')
+def rename_time_2d(nc_filename, ds):
+    if (
+        ('cf' in ds.attrs and str(ds.attrs['cf']) == '1.6') or
+        ('CF' in ds.attrs and str(ds.attrs['CF']) == '1.6')
+       ):
+        pass
+    else:
+        # Need to do this in two steps after renaming the variable.
+        # Not sure why, but it works this way.
+        with netCDF4.Dataset(nc_filename, 'r+') as nc:
+            nc.renameVariable('time', 'time_cf')
+            # nc.renameVariable('time_2d', 'time_cf_2d')
+            timebak = nc['epic_time_2d'][:]
+            nc.renameVariable('epic_time_2d', 'time')
+            nc.renameVariable('epic_time2_2d', 'time2')
 
-    with netCDF4.Dataset(nc_filename, 'r+') as nc:
-        nc['time'][:] = timebak
+        with netCDF4.Dataset(nc_filename, 'r+') as nc:
+            nc['time'][:] = timebak
+
 
 def open_time_2d_dataset(filename):
     # need to drop 'time' variable because of xarray limitations related
     # to coordinates and variables with the same name, otherwise it raises a
     # MissingDimensionsError
-    return xr.open_dataset(filename,
-                           decode_times=False,
-                           drop_variables='time')
+    # Check if CF or not, and return the correct dataset
+    with xr.open_dataset(filename,
+                         decode_times=False,
+                         drop_variables='time') as ds:
+        if 'cf' in ds.attrs or 'CF' in ds.attrs:
+            iscf = True
+        else:
+            iscf = False
+
+    if iscf:
+        return xr.open_dataset(filename)
+    else:
+        return xr.open_dataset(filename,
+                               decode_times=False,
+                               drop_variables='time')
 
 
 def epic_to_cf_time(ds):
-    ds['time'] = ds['time_cf']
+    if 'time_cf' in ds:
+        ds['time'] = ds['time_cf']
+    else:
+        ds['time'] = epic_to_datetime(ds['time'].values, ds['time2'].values)
+
     for v in ['time_cf', 'time2', 'epic_time', 'epic_time2']:
         if v in ds:
             ds = ds.drop(v)
@@ -501,13 +540,11 @@ def make_epic_time2(jd):
 def create_epic_times(ds, waves=False):
     jd = make_jd(ds['time'].to_dataframe().index)
 
-    ds['epic_time'] = xr.DataArray(make_epic_time(jd),
-                                   dims='time',
-                                   encoding={'_FillValue': None})
+    ds['epic_time'] = xr.DataArray(make_epic_time(jd), dims='time')
+    ds['epic_time'].encoding['_FillValue'] = None
 
-    ds['epic_time2'] = xr.DataArray(make_epic_time2(jd),
-                                    dims='time',
-                                    encoding={'_FillValue': None})
+    ds['epic_time2'] = xr.DataArray(make_epic_time2(jd), dims='time')
+    ds['epic_time2'].encoding['_FillValue'] = None
 
     return ds
 
@@ -527,13 +564,14 @@ def create_2d_time(ds):
     jd_2d = np.reshape(raveljd, ds['time_2d'].shape)
 
     ds['epic_time_2d'] = xr.DataArray(make_epic_time(jd_2d),
-                                      dims=('time', 'sample'),
-                                      encoding={'_FillValue': None})
-    ds['epic_time2_2d'] = xr.DataArray(make_epic_time2(jd_2d),
-                                       dims=('time', 'sample'),
-                                       encoding={'_FillValue': None})
+                                      dims=('time', 'sample'))
+    ds['epic_time_2d'].encoding['_FillValue'] = None
 
-    ds = ds.drop('time_2d') # don't need it anymore
+    ds['epic_time2_2d'] = xr.DataArray(make_epic_time2(jd_2d),
+                                       dims=('time', 'sample'))
+    ds['epic_time2_2d'].encoding['_FillValue'] = None
+
+    ds = ds.drop('time_2d')  # don't need it anymore
 
     return ds
 
@@ -597,8 +635,10 @@ def shift_time(ds, timeshift):
     if 'ClockError' in ds.attrs:
         if ds.attrs['ClockError'] != 0:
             # note negative on ds.attrs['ClockError']
-            ds['time'] = ds['time'] + np.timedelta64(-ds.attrs['ClockError'], 's')
-            print('Time shifted by %d s from ClockError' % -ds.attrs['ClockError'])
+            ds['time'] = (ds['time'] +
+                          np.timedelta64(-ds.attrs['ClockError'], 's'))
+            print('Time shifted by {:d} s from ClockError'.format(
+                -ds.attrs['ClockError']))
 
     return ds
 
@@ -695,12 +735,141 @@ def create_nominal_instrument_depth(ds):
     return ds
 
 
+def no_p_create_depth(ds):
+    # no_p = no pressure sensor. also use for exo
+    if 'NAVD88_ref' in ds.attrs:
+        ds['depth'] = xr.DataArray([-ds.attrs['NAVD88_ref'] -
+            ds.attrs['initial_instrument_height']], dims='depth')
+        ds['depth'].attrs['VERT_DATUM'] = 'NAVD88'
+        ds['depth'].attrs['NOTE'] = ('Computed as platform depth '
+                                     '[m NAVD88] minus '
+                                     'initial_instrument_height')
+    else:
+        ds['depth'] = xr.DataArray([ds.attrs['WATER_DEPTH'] -
+            ds.attrs['initial_instrument_height']], dims='depth')
+        ds['depth'].attrs['NOTE'] = ('Computed as WATER_DEPTH minus '
+                                     'initial_instrument_height')
+
+    ds['depth'].attrs['positive'] = 'down'
+    ds['depth'].attrs['axis'] = 'z'
+    ds['depth'].attrs['units'] = 'm'
+    ds['depth'].attrs['epic_code'] = 3
+    ds['depth'].encoding['_FillValue'] = None
+
+    return ds
+
+
+def no_p_add_depth(ds, var):
+    # no_p = no pressure sensor. also use for exo
+    ds[var] = xr.concat([ds[var]], dim=ds['depth'])
+
+    # Reorder so lat, lon are at the end.
+    dims = [d for d in ds[var].dims if (d != 'depth')]
+    dims.extend(['depth'])
+    dims = tuple(dims)
+
+    ds[var] = ds[var].transpose(*dims)
+
+    return ds
+
+
+def insert_note(ds, var, notetxt):
+    if 'note' in ds[var].attrs:
+        ds[var].attrs['note'] = notetxt + ds[var].attrs['note']
+    else:
+        ds[var].attrs.update({'note': notetxt})
+
+    return ds
+
+
+def add_delta_t(ds):
+    deltat = np.asscalar(
+        (ds['time'][1] - ds['time'][0]) / np.timedelta64(1, 's'))
+    if not deltat.is_integer():
+        warnings.warn('DELTA_T is not an integer; casting as int in attrs')
+
+    ds.attrs['DELTA_T'] = int(deltat)
+
+    return ds
+
+
 def check_valid_metadata(metadata):
     for k in ['initial_instrument_height',
               'orientation']:
         if k not in metadata:
             raise KeyError(
                 k + ' must be defined, most likely in config.yaml')
+
+def read_samplingrates_burst(ds,conn):
+    '''
+    Reads in sample information from RBR instrument in burst mode
+    '''
+    # Get samples per burst
+    try:
+        # this seems to be used on older-style databases;
+        # throws error on newer files
+        samplingcount = conn.execute(
+            "select samplingcount from schedules").fetchall()[0][0]
+    except sqlite3.OperationalError:
+        samplingcount = conn.execute(
+            "select samplingcount from wave").fetchall()[0][0]
+    ds.attrs['samples_per_burst'] = samplingcount
+
+    # Get sampling interval
+    try:
+        samplingperiod = conn.execute(
+            "select samplingperiod from schedules").fetchall()[0][0]
+    except sqlite3.OperationalError:
+        samplingperiod = conn.execute(
+            "select samplingperiod from wave").fetchall()[0][0]
+    ds.attrs['sample_interval'] = samplingperiod / 1000
+
+    # Get Repetition interval of sampling
+    try:
+        repetitionperiod = conn.execute(
+            "select repetitionperiod from schedules").fetchall()[0][0]
+    except sqlite3.OperationalError:
+        repetitionperiod = conn.execute(
+            "select repetitionperiod from wave").fetchall()[0][0]
+
+    # Convert to seconds
+    ds.attrs['burst_interval'] = repetitionperiod / 1000
+
+    # Length of bursts in data points
+    ds.attrs['burst_length'] = ds.attrs['samples_per_burst'] * \
+        ds.attrs['sample_interval']
+
+    return ds
+
+def read_samplingrates_continuous(ds,conn):
+    '''
+    Reads in sample information from RBR instrument in continuous mode
+    '''
+    try:
+        samplingperiod = conn.execute(
+            "select samplingperiod from schedules").fetchall()[0][0]
+    except sqlite3.OperationalError:
+        samplingperiod = conn.execute(
+            "select samplingperiod from continuous").fetchall()[0][0]
+
+    samplingperiod = samplingperiod / 1000 # convert from ms to sec
+    samplingrate = 1/samplingperiod # convert to rate [Hz]
+
+    # Set sampling period, [sec]
+    ds.attrs['sample_interval'] = samplingperiod
+
+    # Set samples per burst
+    samplingcount = ds.attrs['wave_interval']*samplingrate
+    ds.attrs['samples_per_burst'] = round(samplingcount)
+
+    # Set burst interval, [sec], USER DEFINED in instrument attr
+    ds.attrs['burst_interval'] = ds.attrs['wave_interval']
+
+    # Set sample interval
+    ds.attrs['burst_length'] = ds.attrs['samples_per_burst'] * \
+        ds.attrs['sample_interval']
+
+    return ds
 
 
 def read_globalatts(fname):
@@ -746,6 +915,7 @@ def loadmat(filename):
     '''
     data = spio.loadmat(filename, struct_as_record=False, squeeze_me=True)
     return _check_keys(data)
+
 
 
 def _check_keys(dic):

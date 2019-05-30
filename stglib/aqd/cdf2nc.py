@@ -4,6 +4,7 @@ import xarray as xr
 from ..core import utils
 from . import qaqc
 
+
 def cdf_to_nc(cdf_filename, atmpres=False):
     """
     Load a "raw" .cdf file and generate a processed .nc file
@@ -85,7 +86,12 @@ def cdf_to_nc(cdf_filename, atmpres=False):
     VEL = utils.add_history(VEL)
 
     # Rename time variables for EPIC compliance, keeping a time_cf coorindate.
-    if (not 'cf' in VEL.attrs) or (VEL.attrs['cf'] != '1.6'):
+    if (
+        ('cf' in VEL.attrs and str(VEL.attrs['cf']) == '1.6') or
+        ('CF' in VEL.attrs and str(VEL.attrs['CF']) == '1.6')
+       ):
+        pass
+    else:
         VEL = utils.rename_time(VEL)
 
     for var in VEL.variables:
@@ -125,15 +131,15 @@ def ds_drop(ds):
     """
 
     todrop = ['VEL1',
-        'VEL2',
-        'VEL3',
-        'AMP1',
-        'AMP2',
-        'AMP3',
-        'TransMatrix',
-        'AnalogInput1',
-        'AnalogInput2',
-        'jd',
-        'Depth']
+              'VEL2',
+              'VEL3',
+              'AMP1',
+              'AMP2',
+              'AMP3',
+              'TransMatrix',
+              'AnalogInput1',
+              'AnalogInput2',
+              'jd',
+              'Depth']
 
     return ds.drop([t for t in todrop if t in ds.variables])

@@ -1,4 +1,5 @@
 from __future__ import division, print_function
+import numpy as np
 import xarray as xr
 from ..core import utils
 
@@ -50,6 +51,9 @@ def cdf_to_nc(cdf_filename,
     #     if 'time' not in var:
     #         ds = utils.add_lat_lon(ds, var)
 
+    # trim by minimum pressure for instruments that go out of water_depth
+    ds = trim_min(ds, 'P_1ac')
+
     ds = utils.add_min_max(ds)
 
     ds = utils.add_start_stop_time(ds)
@@ -74,12 +78,28 @@ def cdf_to_nc(cdf_filename,
 
         # Rename time variables for EPIC compliance, keeping a time_cf
         # coorindate.
-        utils.rename_time_2d(nc_filename)
+        utils.rename_time_2d(nc_filename, ds)
 
         print('Done writing netCDF file', nc_filename)
 
     # rename time variables after the fact to conform with EPIC/CMG standards
     # utils.rename_time(nc_filename)
+
+    return ds
+
+def trim_min(ds, var):
+    if var + '_min' in ds.attrs:
+        print('%s: Trimming using minimum value of %f' %
+              (var, ds.attrs[var + '_min']))
+        # remove full burst if any of the burst values are less than
+        # the indicated value
+        bads = (ds[var] < ds.attrs[var + '_min']).any(dim='sample')
+        ds[var][bads, :] = np.nan
+
+        notetxt = ('Values filled where less than %f units. ' %
+                   ds.attrs[var + '_min'])
+
+        ds = utils.insert_note(ds, var, notetxt)
 
     return ds
 
@@ -108,8 +128,17 @@ def ds_add_depth_dim(ds):
     else:
         p = 'P_1'
 
-    ds['depth'] = xr.DataArray([ds[p].mean(dim=['time', 'sample'])],
-                               dims='depth')
+    if 'NAVD88_ref' in ds.attrs:
+        ds['depth'] = xr.DataArray([-ds.attrs['NAVD88_ref'] -
+            ds.attrs['initial_instrument_height']], dims='depth')
+        ds['depth'].attrs['VERT_DATUM'] = 'NAVD88'
+        ds['depth'].attrs['NOTE'] = ('Computed as platform depth '
+                                     '[m NAVD88] minus '
+                                     'initial_instrument_height')
+    else:
+        ds['depth'] = xr.DataArray([ds[p].mean(dim=['time', 'sample'])],
+                                   dims='depth')
+        ds['depth'].attrs['NOTE'] = 'Computed as mean of the pressure sensor'
     ds['depth'].attrs['positive'] = 'down'
     ds['depth'].attrs['axis'] = 'z'
     ds['depth'].attrs['units'] = 'm'
@@ -149,7 +178,7 @@ def ds_add_attrs(ds):
     if 'burst' in ds:
         ds['burst'].encoding['_FillValue'] = 1e35
 
-    ds.attrs['COMPOSITE'] = 0
+    ds.attrs['COMPOSITE'] = np.int32(0)
     ds.attrs['COORD_SYSTEM'] = 'GEOGRAPHIC + sample'
 
     return ds

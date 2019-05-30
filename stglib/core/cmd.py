@@ -108,7 +108,7 @@ def rsknc2waves_parser():
     return parser
 
 
-def hlmcsv2cdf_parser():
+def hwlbcsv2cdf_parser():
     description = ('Convert HOBO pressure sensor .csv file to raw .cdf format.'
                    ' Run this script from the directory containing IQ file')
     parser = argparse.ArgumentParser(description=description)
@@ -118,8 +118,26 @@ def hlmcsv2cdf_parser():
     return parser
 
 
-def hlmcdf2nc_parser():
+def hwlbcdf2nc_parser():
     description = 'Convert raw HOBO .cdf format to processed .nc files'
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument('cdfname', help='raw .CDF filename')
+
+    return parser
+
+
+def iqmat2cdf_parser():
+    description = ('Convert SonTek IQ .mat file to raw .cdf format. Run this '
+                   'script from the directory containing IQ file')
+    parser = argparse.ArgumentParser(description=description)
+    gattsarg(parser)
+    yamlarg(parser)
+
+    return parser
+
+
+def iqcdf2nc_parser():
+    description = 'Convert raw SonTek IQ .cdf format to processed .nc files'
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('cdfname', help='raw .CDF filename')
 
